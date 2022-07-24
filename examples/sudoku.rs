@@ -6,8 +6,9 @@ use wave_function_collapse::{cell::Cell, solver::Solver};
 const STATES: usize = 9;
 const SIDE_LEN: usize = 9;
 const BOARD_SIZE: usize = SIDE_LEN * SIDE_LEN;
+
 type CellStorage = [u16; 1];
-type CellArray = BitArray<CellStorage, Lsb0>;
+type CellState = BitArray<CellStorage, Lsb0>;
 type SudokuCell = Cell<CellStorage, STATES>;
 type BoardState = [SudokuCell; BOARD_SIZE];
 
@@ -23,12 +24,11 @@ fn adjacencies(i: usize) -> Vec<usize> {
     .collect()
 }
 
-fn state_reducer(acc: CellArray, cell: &SudokuCell, _: usize, _: usize) -> CellArray {
-    acc | cell.state()
+fn state_reducer(cell: (usize, &SudokuCell), _: usize) -> CellState {
+    cell.1.state()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    
     let state =
         parse("6.....5.9.7..4..6.4........51.4...37....63.........9....29.8...........2.9.7.13..")?;
     let mut solver = Solver::new(state, adjacencies, state_reducer);

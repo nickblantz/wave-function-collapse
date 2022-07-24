@@ -5,15 +5,15 @@ use rand::prelude::{SliceRandom, ThreadRng};
 pub type CellState<A> = BitArray<A, Lsb0>;
 
 #[derive(Clone, Copy)]
-pub struct Cell<A: BitViewSized + Copy, const N: usize> {
+pub struct Cell<A: BitViewSized + Clone, const N: usize> {
     /// A BitArray where each 1 represnts a state that the cell could be in
     state: CellState<A>,
-    
+
     /// Is Some when the cell has been fully collapsed
     result: Option<usize>,
 }
 
-impl<A: BitViewSized + Copy, const N: usize> Default for Cell<A, N> {
+impl<A: BitViewSized + Clone, const N: usize> Default for Cell<A, N> {
     fn default() -> Self {
         Self {
             state: {
@@ -28,7 +28,7 @@ impl<A: BitViewSized + Copy, const N: usize> Default for Cell<A, N> {
     }
 }
 
-impl<A: BitViewSized + Copy, const N: usize> From<usize> for Cell<A, N> {
+impl<A: BitViewSized + Clone, const N: usize> From<usize> for Cell<A, N> {
     fn from(n: usize) -> Self {
         Self {
             state: {
@@ -41,12 +41,12 @@ impl<A: BitViewSized + Copy, const N: usize> From<usize> for Cell<A, N> {
     }
 }
 
-impl<A: BitViewSized + Copy, const N: usize> Cell<A, N> {
+impl<A: BitViewSized + Clone, const N: usize> Cell<A, N> {
     /// Takes a BitArray where each 1 represents a state the cell cannot be in
     /// and removes those states from the current cell
     pub fn collapse(&mut self, state: CellState<A>) {
-        self.state = self.state & !state;
-        self.result = match state.count_zeros() {
+        self.state = self.state.clone() & !state;
+        self.result = match self.state.count_ones() {
             1 => Some(self.state.first_one().unwrap()),
             _ => None,
         };
@@ -81,6 +81,6 @@ impl<A: BitViewSized + Copy, const N: usize> Cell<A, N> {
 
     /// The state of the cell
     pub fn state(&self) -> CellState<A> {
-        self.state
+        self.state.clone()
     }
 }

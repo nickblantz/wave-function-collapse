@@ -11,31 +11,44 @@ pub type Adjacencies = fn(usize) -> Vec<usize>;
 
 /// A function which returns a BitArray where each 1 represents a state
 /// that the current tile cannot be in
-pub type StateReducer<A, const N: usize> = fn(BitArray<A, Lsb0>, &Cell<A, N>, usize, usize) -> BitArray<A, Lsb0>;
+pub type StateReducer<A, const N: usize> = fn((usize, &Cell<A, N>), usize) -> BitArray<A, Lsb0>;
 
 /// Solves a constraint problem using wave function collapse and backtracking
 /// ```
 /// use bitvec::{array::BitArray, order::Lsb0};
 /// use wave_function_collapse::{cell::Cell, solver::Solver};
 /// 
+/// // The number of states your cell can collapse to
 /// const STATES: usize = 8;
-/// const SIDE_LEN: usize = 3;
-/// const BOARD_SIZE: usize = SIDE_LEN * SIDE_LEN;
-/// type CellStorage = [u16; 1];
-/// type CellArray = BitArray<CellStorage, Lsb0>;
-/// type MyCell = Cell<CellStorage, STATES>;
-/// type BoardState = [MyCell; BOARD_SIZE];
 /// 
+/// // The size of your solver
+/// const BOARD_SIZE: usize = 16;
+/// 
+/// // The storage requirement of your state
+/// type CellStorage = [u16; 1];
+/// 
+/// // The state wrapper of your cell
+/// type CellState = BitArray<CellStorage, Lsb0>;
+/// 
+/// // The cell used in your solver
+/// type MyCell = Cell<CellStorage, STATES>;
+/// 
+/// // The initial state of your solver
+/// type SolverState = [MyCell; BOARD_SIZE];
+/// 
+/// // Returns a list of adjacent cells used to filter input to your state reducer 
 /// fn adjacencies(i: usize) -> Vec<usize> {
 ///     todo!()
 /// }
 /// 
-/// fn state_reducer(acc: CellArray, cell: &MyCell, _: usize, _: usize) -> CellArray {
+/// // Returns a cell state where each 1 represents a state that the current ith
+/// // cannot be in
+/// fn state_reducer(cell: (usize, &MyCell), i: usize) -> CellState {
 ///     todo!()
 /// }
 /// 
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let state: BoardState = [MyCell::default(); BOARD_SIZE];
+///     let state = [MyCell::default(); BOARD_SIZE];
 ///     let mut solver = Solver::new(state, adjacencies, state_reducer);
 ///     Ok(())
 /// }
@@ -46,12 +59,13 @@ pub struct Solver<A: BitViewSized + Copy, const N: usize, const S: usize> {
 
     /// A stack of the historic board states
     history: Vec<SolverState<A, N, S>>,
-    
-    /// A function which returns cells adjacent to a given index
+
+    /// A function which returns a list of adjacent cells used to filter input
+    /// to `state_reducer`
     adjacencies: Adjacencies,
-    
-    /// A function which returns a BitArray where each 1 represents a state
-    /// that the current tile cannot be in
+
+    /// A function which returns a `BitArray` where each 1 represents a state that the current ith
+    /// cannot be in
     state_reducer: StateReducer<A, N>,
 
     /// Random noise for selecting and solving cells
@@ -86,24 +100,24 @@ impl<A: BitViewSized + Copy, const N: usize, const S: usize> Solver<A, N, S> {
         while !updates.is_empty() {
             let mut new_updates = vec![];
 
-            for i in 0..self.state.len() {
+            for i in 0..S {
                 if self.state[i].result().is_some() {
                     continue;
                 }
 
-                let state = (self.adjacencies)(i)
+                let reduction = (self.adjacencies)(i)
                     .iter()
                     .filter(|&j| updates.iter().find(|&k| j == k).is_some())
                     .map(|&j| (j, &self.state[j]))
-                    .fold(BitArray::<A, Lsb0>::ZERO, |acc, (j, cell)| {
-                        (self.state_reducer)(acc, cell, i, j)
+                    .fold(BitArray::ZERO, |acc, cell| {
+                        acc | (self.state_reducer)(cell, i)
                     });
 
-                if state.count_ones() == 0 {
+                if reduction.count_ones() == 0 {
                     continue;
                 }
 
-                self.state[i].collapse(state);
+                self.state[i].collapse(reduction);
 
                 if self.state[i].result().is_some() {
                     new_updates.push(i);
@@ -173,11 +187,57 @@ impl<A: BitViewSized + Copy, const N: usize, const S: usize> Solver<A, N, S> {
             .collect::<Vec<usize>>();
 
         self.collapse(updates);
-        // panic!("stop");
 
         while let Some(i) = self.lowest_entropy() {
             updates = self.observe(i);
             self.collapse(updates);
         }
     }
+
+    fn pan_direction<'a, I: Iterator<Item = usize>>(
+        &mut self,
+        iter: I,
+        predicate: &'a dyn Fn(usize) -> bool,
+        accessor: &'a dyn Fn(usize) -> usize,
+    ) {
+        for i in iter {
+            self.state[i] = if predicate(i) {
+                self.state[accessor(i)]
+            } else {
+                Cell::<A, N>::default()
+            };
+        }
+    }
+
+    /// Pans the solver, shifting the entire state by the distance in `Pan`
+    pub fn pan(&mut self, pan: Pan, row_len: usize) {
+        match pan {
+            Pan::Left(distance) => {
+                self.pan_direction((0..S).rev(), &|i| i % row_len > distance, &|i| i - distance)
+            }
+            Pan::Right(distance) => {
+                self.pan_direction(0..S, &|i| row_len - i % row_len > distance, &|i| {
+                    i + distance
+                })
+            }
+            Pan::Up(distance) => {
+                self.pan_direction((0..S).rev(), &|i| i / row_len > distance, &|i| {
+                    (i / row_len - distance) * row_len + i % row_len
+                })
+            }
+            Pan::Down(distance) => {
+                self.pan_direction(0..S, &|i| S / row_len - i / row_len > distance, &|i| {
+                    (i / row_len + distance) * row_len + i % row_len
+                })
+            }
+        }
+    }
+}
+
+/// The direction and distance to pan
+pub enum Pan {
+    Left(usize),
+    Right(usize),
+    Up(usize),
+    Down(usize),
 }
